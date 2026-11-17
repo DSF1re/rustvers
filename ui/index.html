@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rustvers</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app" hidden>
+    <aside id="sidebar">
+      <header class="sidebar-head">
+        <div class="vault-name" id="vault-name" title=""></div>
+        <button class="icon-btn" id="btn-rescan" title="Пересканировать (Ctrl+R)" aria-label="Пересканировать">
+          <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-open" title="Открыть хранилище (Ctrl+O)" aria-label="Открыть хранилище">
+          <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        </button>
+      </header>
+      <div class="search">
+        <input id="search" type="search" placeholder="Поиск заметок…  Ctrl+K" autocomplete="off" spellcheck="false">
+      </div>
+      <nav id="tree" class="tree" aria-label="Заметки"></nav>
+      <footer class="sidebar-foot" id="stats"></footer>
+    </aside>
+    <div class="resizer" id="resizer"></div>
+
+    <main id="main">
+      <header class="toolbar">
+        <button class="icon-btn" id="btn-back" title="Назад (Alt+←)" aria-label="Назад">
+          <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-forward" title="Вперёд (Alt+→)" aria-label="Вперёд">
+          <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+        <div class="crumbs" id="crumbs"></div>
+        <div class="segmented" role="tablist">
+          <button id="tab-graph" role="tab" title="Граф (Ctrl+G)">Граф</button>
+          <button id="tab-note" role="tab" title="Заметка (Ctrl+G)">Заметка</button>
+        </div>
+      </header>
+
+      <section id="graph-view" class="view">
+        <canvas id="graph"></canvas>
+        <div class="graph-panel">
+          <label><input type="checkbox" id="opt-missing" checked> Несуществующие</label>
+          <label><input type="checkbox" id="opt-orphans" checked> Без связей</label>
+          <label><input type="checkbox" id="opt-labels" checked> Подписи</label>
+          <button id="btn-fit" class="text-btn">По размеру</button>
+        </div>
+        <div class="legend">
+          <span><i class="dot md"></i>Markdown</span>
+          <span><i class="dot html"></i>HTML</span>
+          <span><i class="dot missing"></i>Нет файла</span>
+        </div>
+      </section>
+
+      <section id="note-view" class="view" hidden>
+        <iframe id="note-frame" sandbox="allow-scripts" title="Заметка"></iframe>
+        <aside id="links-panel" class="links-panel">
+          <h4>Обратные ссылки <span id="backlinks-count"></span></h4>
+          <ul id="backlinks"></ul>
+          <h4>Исходящие <span id="outlinks-count"></span></h4>
+          <ul id="outlinks"></ul>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <div id="welcome" class="welcome" hidden>
+    <div class="welcome-card">
+      <svg class="logo" viewBox="0 0 64 64"><path d="M20 44 32 20 46 40Z"/><circle cx="20" cy="44" r="6"/><circle cx="32" cy="20" r="6"/><circle cx="46" cy="40" r="5"/></svg>
+      <h1>Rustvers</h1>
+      <p>Заметки в Markdown и HTML, связанные в граф.<br>Выберите папку с заметками, чтобы начать.</p>
+      <button id="btn-welcome-open" class="primary-btn">Открыть папку</button>
+      <p class="error" id="welcome-error"></p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
