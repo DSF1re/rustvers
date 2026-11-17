@@ -3004,6 +3004,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "walkdir",
+ "webkit2gtk",
 ]
 
 [[package]]

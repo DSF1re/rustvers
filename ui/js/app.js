@@ -211,8 +211,35 @@ window.addEventListener("message", (e) => {
 // Клавиатура и элементы управления
 // ---------------------------------------------------------------------------
 
+// Счётчик кадров (Ctrl+Shift+F): видно, идёт ли отрисовка на частоте монитора.
+const fpsMeter = (() => {
+  let el = null, raf = 0, frames = 0, since = 0;
+  const tick = (t) => {
+    if (!since) since = t;
+    frames++;
+    if (t - since >= 500) {
+      el.textContent = `${Math.round((frames * 1000) / (t - since))} fps`;
+      frames = 0;
+      since = t;
+    }
+    raf = requestAnimationFrame(tick);
+  };
+  return {
+    toggle() {
+      if (el) { cancelAnimationFrame(raf); el.remove(); el = null; return; }
+      el = document.createElement("div");
+      el.className = "fps-meter";
+      el.textContent = "… fps";
+      document.body.append(el);
+      frames = since = 0;
+      raf = requestAnimationFrame(tick);
+    },
+  };
+})();
+
 function handleKey({ key, ctrl, alt, shift }) {
   const k = key.length === 1 ? key.toLowerCase() : key;
+  if (ctrl && shift && (k === "f" || k === "а")) { fpsMeter.toggle(); return true; }
   if (ctrl && (k === "k" || k === "p" || k === "л" || k === "з")) { $("search").focus(); $("search").select(); return true; }
   if (ctrl && (k === "g" || k === "п")) { toggleView(); return true; }
   if (ctrl && (k === "o" || k === "щ")) { pickVault(); return true; }

@@ -30,6 +30,10 @@ pulldown-cmark = { version = "0.13", default-features = false, features = ["html
 walkdir = "2"
 percent-encoding = "2"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Та же версия, что использует Tauri: нужна для снятия ограничения 60 fps.
+webkit2gtk = "2.0"
+
 [profile.release]
 opt-level = "s"
 lto = true
