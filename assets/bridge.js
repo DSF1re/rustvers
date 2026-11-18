@@ -11,7 +11,11 @@
     if (!a) return;
     const href = a.getAttribute("href");
     if (!href) {
-      if (a.classList.contains("unresolved")) e.preventDefault();
+      if (a.classList.contains("unresolved")) {
+        // Ссылка на несуществующую заметку — предложить создать её.
+        e.preventDefault();
+        if (a.dataset.target) send({ type: "create", target: a.dataset.target });
+      }
       return;
     }
     if (href.startsWith("#")) return; // якорь внутри заметки

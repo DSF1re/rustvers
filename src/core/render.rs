@@ -78,8 +78,8 @@ impl Renderer<'_> {
                 escape_html(&self.url(&n.path, fragment))
             ),
             None => format!(
-                "<a class=\"{class} unresolved\" title=\"Заметка не найдена: {}\">",
-                escape_html(target)
+                "<a class=\"{class} unresolved\" data-target=\"{t}\" title=\"Создать заметку «{t}»\">",
+                t = escape_html(target)
             ),
         }
     }

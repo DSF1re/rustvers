@@ -17,10 +17,7 @@ use crate::core::render::Renderer;
 
 pub const SCHEME: &str = "note";
 
-/// Так WebView видит схему на разных платформах.
-#[cfg(any(windows, target_os = "android"))]
-pub const BASE_URL: &str = "http://note.localhost/";
-#[cfg(not(any(windows, target_os = "android")))]
+/// Адрес схемы в WebKitGTK.
 pub const BASE_URL: &str = "note://localhost/";
 
 type Resp = Response<Cow<'static, [u8]>>;

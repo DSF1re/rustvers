@@ -1,5 +1,6 @@
 // Оболочка приложения: состояние, боковая панель, навигация, просмотр заметок.
-import { GraphView } from "./graph.js";
+import { Editor } from "./editor.js";
+import { NativeGraphView } from "./native-graph.js";
 import { renderTree } from "./tree.js";
 
 const tauri = window.__TAURI__;
@@ -16,15 +17,25 @@ const state = {
   history: [],
   pos: -1,
   reload: 0,           // для сброса кэша iframe после пересканирования
+  editing: false,      // режим правки исходника
 };
 
-const graph = new GraphView($("graph"), { onOpen: (id) => openNote(id) });
+const graph = new NativeGraphView($("graph"), { onOpen: (id) => openNote(id) });
+const editor = new Editor({
+  textarea: $("editor"),
+  suggest: $("suggest"),
+  status: $("save-status"),
+  notes: () => state.vault?.nodes || [],
+  onSaved: (vault) => applyVault(vault),
+  onError: (msg) => toast(msg),
+});
 
 // ---------------------------------------------------------------------------
 // Хранилище
 // ---------------------------------------------------------------------------
 
-function loadVault(vault, { keepNote = false } = {}) {
+/** Обновить индексы, дерево и счётчики по новому снимку хранилища. */
+function indexVault(vault) {
   state.vault = vault;
   state.byId = new Map(vault.nodes.map((n) => [n.id, n]));
   state.out = new Map(vault.nodes.map((n) => [n.id, new Set()]));
@@ -34,7 +45,6 @@ function loadVault(vault, { keepNote = false } = {}) {
     state.out.get(a).add(b);
     state.back.get(b).add(a);
   }
-  state.reload++;
 
   $("welcome").hidden = true;
   $("app").hidden = false;
@@ -42,18 +52,33 @@ function loadVault(vault, { keepNote = false } = {}) {
   $("vault-name").title = vault.root;
   const notes = vault.nodes.filter((n) => n.kind !== "missing").length;
   $("stats").textContent = `${notes} ${plural(notes, "заметка", "заметки", "заметок")} · ${vault.edges.length} ${plural(vault.edges.length, "связь", "связи", "связей")}`;
+  refreshTree();
+  if (state.current && state.byId.has(state.current)) renderLinks(state.current);
+}
 
+/** Снимок после сохранения/создания: граф доращивается, вид не сбрасывается. */
+function applyVault(vault) {
+  indexVault(vault);
+  graph.setData(vault, { fresh: false });
+  updateChrome();
+}
+
+function loadVault(vault, { keepNote = false } = {}) {
+  indexVault(vault);
+  state.reload++;
   if (keepNote && state.current && state.byId.has(state.current)) {
-    graph.setData(vault);
+    graph.setData(vault, { fresh: false });
+    if (state.editing) editor.open(state.current, { discard: true }).catch(fail);
     showNote(state.current, "");
   } else {
+    state.editing = false;
     state.current = null;
     state.history = [];
     state.pos = -1;
     graph.setData(vault);
     setView("graph");
   }
-  refreshTree();
+  showMode();
   updateChrome();
 }
 
@@ -69,6 +94,7 @@ async function pickVault() {
 
 async function rescan() {
   if (!state.vault) return;
+  await editor.flush();
   try {
     loadVault(await invoke("rescan"), { keepNote: true });
     toast("Хранилище обновлено");
@@ -85,7 +111,7 @@ function openNote(id, hash = "", { push = true } = {}) {
   const node = state.byId.get(id);
   if (!node) return;
   if (node.kind === "missing") {
-    toast(`Заметки «${node.title}» ещё нет`);
+    createNote(node.title);
     return;
   }
   if (push) {
@@ -97,6 +123,11 @@ function openNote(id, hash = "", { push = true } = {}) {
 }
 
 function showNote(id, hash) {
+  if (state.editing && id !== editor.path) {
+    // Сначала сохраняем текущую правку; при ошибке остаёмся на месте.
+    editor.open(id).then(() => showNote(id, hash), fail);
+    return;
+  }
   state.current = id;
   const frame = $("note-frame");
   const url = state.vault.base_url + encodePath(id) + `?v=${state.reload}` + (hash ? "#" + encodeURIComponent(hash) : "");
@@ -127,6 +158,64 @@ function setView(view) {
   updateChrome();
 }
 
+/** Чтение ↔ правка исходника текущей заметки. */
+async function setEditing(on) {
+  if (!state.current || on === state.editing) return;
+  if (on) {
+    try {
+      await editor.open(state.current);
+    } catch (e) {
+      return fail(e);
+    }
+  } else {
+    await editor.flush();
+    if (editor.dirty) return; // не сохранилось — не уходим из редактора
+    state.reload++; // показать свежую версию
+  }
+  state.editing = on;
+  setView("note");
+  showMode();
+  if (on) editor.focus();
+  else showNote(state.current, "");
+}
+
+function showMode() {
+  $("note-frame").hidden = state.editing;
+  $("editor-wrap").hidden = !state.editing;
+  $("save-status").hidden = !state.editing;
+  $("btn-edit").setAttribute("aria-pressed", state.editing);
+  $("btn-edit").title = state.editing ? "Читать (Ctrl+E)" : "Редактировать (Ctrl+E)";
+}
+
+/** Создать заметку (`Имя`, `папка/Имя`, `Имя.html`) и открыть её на правку. */
+async function createNote(spec) {
+  try {
+    await editor.flush();
+    const { path, vault } = await invoke("create_note", { spec });
+    applyVault(vault);
+    state.editing = false;
+    openNote(path);
+    await setEditing(true);
+    toast(`Создана заметка ${path}`);
+  } catch (e) {
+    fail(e);
+  }
+}
+
+function showNewNote() {
+  if (!state.vault) return;
+  const input = $("new-note-input");
+  const dir = state.current?.includes("/") ? state.current.slice(0, state.current.lastIndexOf("/") + 1) : "";
+  $("new-note").hidden = false;
+  input.value = dir;
+  input.focus();
+  input.setSelectionRange(dir.length, dir.length);
+}
+
+function hideNewNote() {
+  $("new-note").hidden = true;
+}
+
 function toggleView() {
   setView(state.view === "graph" ? "note" : "graph");
 }
@@ -137,6 +226,10 @@ function updateChrome() {
   $("tab-graph").setAttribute("aria-selected", state.view === "graph");
   $("tab-note").setAttribute("aria-selected", state.view === "note");
   $("tab-note").disabled = !state.current;
+  $("graph-tools").hidden = state.view !== "graph";
+  $("btn-edit").hidden = state.view !== "note";
+  if (state.view !== "note") $("save-status").hidden = true;
+  else $("save-status").hidden = !state.editing;
 
   const crumbs = $("crumbs");
   crumbs.replaceChildren();
@@ -202,6 +295,8 @@ window.addEventListener("message", (e) => {
     else toast(`Не заметка: ${msg.path}`);
   } else if (msg.type === "external" && /^(https?|mailto):/i.test(msg.url)) {
     tauri.opener.openUrl(msg.url).catch(fail);
+  } else if (msg.type === "create" && typeof msg.target === "string") {
+    createNote(msg.target);
   } else if (msg.type === "key") {
     handleKey(msg);
   }
@@ -211,37 +306,13 @@ window.addEventListener("message", (e) => {
 // Клавиатура и элементы управления
 // ---------------------------------------------------------------------------
 
-// Счётчик кадров (Ctrl+Shift+F): видно, идёт ли отрисовка на частоте монитора.
-const fpsMeter = (() => {
-  let el = null, raf = 0, frames = 0, since = 0;
-  const tick = (t) => {
-    if (!since) since = t;
-    frames++;
-    if (t - since >= 500) {
-      el.textContent = `${Math.round((frames * 1000) / (t - since))} fps`;
-      frames = 0;
-      since = t;
-    }
-    raf = requestAnimationFrame(tick);
-  };
-  return {
-    toggle() {
-      if (el) { cancelAnimationFrame(raf); el.remove(); el = null; return; }
-      el = document.createElement("div");
-      el.className = "fps-meter";
-      el.textContent = "… fps";
-      document.body.append(el);
-      frames = since = 0;
-      raf = requestAnimationFrame(tick);
-    },
-  };
-})();
-
 function handleKey({ key, ctrl, alt, shift }) {
   const k = key.length === 1 ? key.toLowerCase() : key;
-  if (ctrl && shift && (k === "f" || k === "а")) { fpsMeter.toggle(); return true; }
+  if (ctrl && shift && (k === "f" || k === "а")) { graph.toggleFps(); return true; }
   if (ctrl && (k === "k" || k === "p" || k === "л" || k === "з")) { $("search").focus(); $("search").select(); return true; }
   if (ctrl && (k === "g" || k === "п")) { toggleView(); return true; }
+  if (ctrl && (k === "e" || k === "у") && state.view === "note") { setEditing(!state.editing); return true; }
+  if (ctrl && (k === "n" || k === "т")) { showNewNote(); return true; }
   if (ctrl && (k === "o" || k === "щ")) { pickVault(); return true; }
   if ((ctrl && (k === "r" || k === "к")) || k === "F5") { rescan(); return true; }
   if (alt && k === "ArrowLeft") { go(-1); return true; }
@@ -272,6 +343,23 @@ $("search").addEventListener("keydown", (e) => {
   }
 });
 $("btn-open").onclick = pickVault;
+$("btn-new").onclick = showNewNote;
+$("btn-edit").onclick = () => setEditing(!state.editing);
+$("new-note-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    const spec = e.target.value.trim();
+    hideNewNote();
+    if (spec) createNote(spec);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    hideNewNote();
+  }
+});
+$("new-note-input").addEventListener("blur", hideNewNote);
+// Не терять последние правки при закрытии окна.
+window.addEventListener("beforeunload", () => editor.flush());
 $("btn-welcome-open").onclick = pickVault;
 $("btn-rescan").onclick = rescan;
 $("btn-back").onclick = () => go(-1);
@@ -337,6 +425,11 @@ function fail(e) {
 // ---------------------------------------------------------------------------
 
 (async () => {
+  try {
+    await graph.start();
+  } catch (e) {
+    $("graph-error").textContent = `Граф недоступен: ${e}`;
+  }
   try {
     const vault = await invoke("current_vault");
     if (vault) return loadVault(vault);

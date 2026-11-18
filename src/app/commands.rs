@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime, State};
 
 use super::state::{AppState, Session};
@@ -34,16 +35,62 @@ pub async fn current_vault(state: State<'_, AppState>) -> Result<Option<serde_js
 }
 
 /// Пересканировать папку (после правок заметок снаружи).
+/// Неизменённые файлы не перечитываются.
 #[tauri::command]
 pub async fn rescan(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let root = state
-        .session
-        .read()
-        .unwrap()
-        .as_ref()
-        .map(|s| s.vault.root().to_path_buf())
-        .ok_or("Хранилище не открыто")?;
-    install(&state, Session::open(root)?)
+    let fresh = state.session.read().unwrap().as_ref().ok_or(NOT_OPEN)?.refresh()?;
+    install(&state, fresh)
+}
+
+const NOT_OPEN: &str = "Хранилище не открыто";
+
+#[derive(Serialize)]
+pub struct NoteSource {
+    content: String,
+    /// Время изменения файла (мс) — вернуть в save_note.
+    mtime: u64,
+}
+
+/// Исходный текст заметки для редактора.
+#[tauri::command]
+pub async fn note_source(state: State<'_, AppState>, path: String) -> Result<NoteSource, String> {
+    let guard = state.session.read().unwrap();
+    let (content, mtime) = guard.as_ref().ok_or(NOT_OPEN)?.source(&path)?;
+    Ok(NoteSource { content, mtime })
+}
+
+#[derive(Serialize)]
+pub struct Saved {
+    mtime: u64,
+    vault: serde_json::Value,
+}
+
+/// Сохраняет заметку. Отказывает, если файл изменили снаружи после `mtime`.
+#[tauri::command]
+pub async fn save_note(
+    state: State<'_, AppState>,
+    path: String,
+    content: String,
+    mtime: Option<u64>,
+) -> Result<Saved, String> {
+    let mut guard = state.session.write().unwrap();
+    let session = guard.as_mut().ok_or(NOT_OPEN)?;
+    let mtime = session.save(&path, &content, mtime)?;
+    Ok(Saved { mtime, vault: to_json(session)? })
+}
+
+#[derive(Serialize)]
+pub struct Created {
+    path: String,
+    vault: serde_json::Value,
+}
+
+/// Создаёт заметку: `Имя`, `папка/Имя` или `Имя.html`.
+#[tauri::command]
+pub async fn create_note(state: State<'_, AppState>, spec: String) -> Result<Created, String> {
+    let (session, path) = state.session.read().unwrap().as_ref().ok_or(NOT_OPEN)?.create(&spec)?;
+    let vault = install(&state, session)?;
+    Ok(Created { path, vault })
 }
 
 fn install(state: &AppState, session: Session) -> Result<serde_json::Value, String> {

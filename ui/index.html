@@ -11,6 +11,9 @@
     <aside id="sidebar">
       <header class="sidebar-head">
         <div class="vault-name" id="vault-name" title=""></div>
+        <button class="icon-btn" id="btn-new" title="Новая заметка (Ctrl+N)" aria-label="Новая заметка">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
         <button class="icon-btn" id="btn-rescan" title="Пересканировать (Ctrl+R)" aria-label="Пересканировать">
           <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
         </button>
@@ -20,6 +23,9 @@
       </header>
       <div class="search">
         <input id="search" type="search" placeholder="Поиск заметок…  Ctrl+K" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="new-note" id="new-note" hidden>
+        <input id="new-note-input" placeholder="Имя, папка/Имя или Имя.html" autocomplete="off" spellcheck="false">
       </div>
       <nav id="tree" class="tree" aria-label="Заметки"></nav>
       <footer class="sidebar-foot" id="stats"></footer>
@@ -35,6 +41,16 @@
           <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
         </button>
         <div class="crumbs" id="crumbs"></div>
+        <div class="graph-tools" id="graph-tools">
+          <label><input type="checkbox" id="opt-missing" checked> Несуществующие</label>
+          <label><input type="checkbox" id="opt-orphans" checked> Без связей</label>
+          <label><input type="checkbox" id="opt-labels" checked> Подписи</label>
+          <button id="btn-fit" class="text-btn">По размеру</button>
+        </div>
+        <span class="save-status" id="save-status" hidden></span>
+        <button class="icon-btn" id="btn-edit" title="Редактировать (Ctrl+E)" aria-label="Редактировать" aria-pressed="false" hidden>
+          <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>
+        </button>
         <div class="segmented" role="tablist">
           <button id="tab-graph" role="tab" title="Граф (Ctrl+G)">Граф</button>
           <button id="tab-note" role="tab" title="Заметка (Ctrl+G)">Заметка</button>
@@ -42,22 +58,16 @@
       </header>
 
       <section id="graph-view" class="view">
-        <canvas id="graph"></canvas>
-        <div class="graph-panel">
-          <label><input type="checkbox" id="opt-missing" checked> Несуществующие</label>
-          <label><input type="checkbox" id="opt-orphans" checked> Без связей</label>
-          <label><input type="checkbox" id="opt-labels" checked> Подписи</label>
-          <button id="btn-fit" class="text-btn">По размеру</button>
-        </div>
-        <div class="legend">
-          <span><i class="dot md"></i>Markdown</span>
-          <span><i class="dot html"></i>HTML</span>
-          <span><i class="dot missing"></i>Нет файла</span>
-        </div>
+        <!-- Сюда Rust кладёт нативную подповерхность с графом (src/app/native). -->
+        <div id="graph"><p class="graph-error" id="graph-error"></p></div>
       </section>
 
       <section id="note-view" class="view" hidden>
         <iframe id="note-frame" sandbox="allow-scripts" title="Заметка"></iframe>
+        <div class="editor-wrap" id="editor-wrap" hidden>
+          <textarea id="editor" spellcheck="false" autocomplete="off" aria-label="Исходный текст заметки"></textarea>
+          <ul class="suggest" id="suggest" hidden></ul>
+        </div>
         <aside id="links-panel" class="links-panel">
           <h4>Обратные ссылки <span id="backlinks-count"></span></h4>
           <ul id="backlinks"></ul>

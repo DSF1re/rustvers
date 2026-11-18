@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use super::links;
 use super::paths;
-use super::vault::{NoteKind, Vault};
+use super::vault::{Note, NoteKind, Vault};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -49,7 +49,13 @@ fn looks_like_note(target: &str) -> bool {
     }
 }
 
+/// Строит граф, читая все заметки с диска.
 pub fn build(vault: &Vault) -> Graph {
+    build_from(vault, |note| vault.read(note).map(|src| links::extract(note.kind, &src)).unwrap_or_default())
+}
+
+/// Строит граф по уже известным ссылкам каждой заметки (без чтения файлов).
+pub fn build_from(vault: &Vault, mut targets: impl FnMut(&Note) -> Vec<String>) -> Graph {
     let mut nodes: Vec<Node> = vault
         .notes()
         .iter()
@@ -59,8 +65,7 @@ pub fn build(vault: &Vault) -> Graph {
     let mut edges = HashSet::new();
 
     for (from, note) in vault.notes().iter().enumerate() {
-        let Ok(src) = vault.read(note) else { continue };
-        for target in links::extract(note.kind, &src) {
+        for target in targets(note) {
             let to = if let Some(n) = vault.resolve_note(&target, &note.path) {
                 vault.note_index(n)
             } else if vault.resolve_file(&target, &note.path).is_some() || !looks_like_note(&target) {

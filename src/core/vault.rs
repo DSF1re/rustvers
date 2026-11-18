@@ -198,6 +198,26 @@ impl Vault {
             .min_by_key(|n| (n.path.matches('/').count(), n.path.len()))
     }
 
+    /// Путь для новой заметки по вводу пользователя: `Идея`, `папка/Идея`,
+    /// `страница.html`. Без расширения — Markdown. Запрещены выход за корень,
+    /// скрытые сегменты и уже существующие заметки.
+    pub fn new_note_path(&self, spec: &str) -> Result<String, String> {
+        let spec = spec.trim().replace('\\', "/");
+        let spec = spec.trim_matches('/');
+        if spec.is_empty() {
+            return Err("Пустое имя заметки".into());
+        }
+        if spec.split('/').any(|seg| seg.is_empty() || seg.starts_with('.') || seg.trim() != seg) {
+            return Err("Имя не может содержать пустые, скрытые (с точки) или окружённые пробелами части пути".into());
+        }
+        let path = paths::join_normalize("", spec).ok_or("Путь выходит за пределы хранилища")?;
+        let path = if NoteKind::from_path(&path).is_some() { path } else { format!("{path}.md") };
+        if self.note(&path).is_some() || self.file_by_path.contains_key(&path.to_lowercase()) {
+            return Err(format!("«{path}» уже существует"));
+        }
+        Ok(path)
+    }
+
     /// Разрешает ссылку на любой файл (картинки и прочие вложения).
     pub fn resolve_file(&self, target: &str, from: &str) -> Option<&str> {
         let target = target.trim();
@@ -250,6 +270,20 @@ pub(crate) mod tests {
         assert_eq!(v.resolve_note("Page.html", "x.md").unwrap().path, "Web/Page.html");
         assert_eq!(v.resolve_note("readme", "x.md").unwrap().path, "Readme.markdown");
         assert!(v.resolve_note("missing", "index.md").is_none());
+    }
+
+    #[test]
+    fn new_note_paths() {
+        let v = sample();
+        assert_eq!(v.new_note_path(" Идея ").unwrap(), "Идея.md");
+        assert_eq!(v.new_note_path("Web/Новая.html").unwrap(), "Web/Новая.html");
+        assert_eq!(v.new_note_path("a/b/c").unwrap(), "a/b/c.md");
+        assert!(v.new_note_path("index").is_err(), "уже есть index.md");
+        assert!(v.new_note_path("Ideas/rust").is_err(), "регистр не важен");
+        assert!(v.new_note_path("../x").is_err());
+        assert!(v.new_note_path(".hidden").is_err());
+        assert!(v.new_note_path("a//b").is_err());
+        assert!(v.new_note_path("").is_err());
     }
 
     #[test]

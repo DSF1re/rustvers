@@ -144,31 +144,13 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .view { flex: 1; min-height: 0; position: relative; }
 
 /* ---------- graph ---------- */
-#graph { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
-#graph.panning { cursor: grabbing; }
-#graph.over-node { cursor: pointer; }
-.graph-panel, .legend {
-  position: absolute;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-2) 88%, transparent);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(6px);
-  color: var(--fg-2);
-  font-size: 12px;
-}
-.graph-panel { top: 12px; right: 12px; }
-.graph-panel label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
-.graph-panel input { accent-color: var(--accent); margin: 0; }
-.legend { bottom: 12px; left: 12px; }
-.legend span { display: flex; align-items: center; gap: 5px; }
-.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-.dot.md { background: var(--node-md); }
-.dot.html { background: var(--node-html); }
-.dot.missing { background: var(--node-missing); }
+#graph { position: absolute; inset: 0; display: grid; place-items: center; }
+.graph-error { color: var(--muted); max-width: 420px; text-align: center; user-select: text; }
+
+.graph-tools { display: flex; align-items: center; gap: 12px; margin-right: 8px; color: var(--fg-2); font-size: 12px; white-space: nowrap; }
+.graph-tools label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.graph-tools input { accent-color: var(--accent); margin: 0; }
+@media (max-width: 860px) { .graph-tools label { display: none; } }
 .text-btn { border: 1px solid var(--border); background: var(--bg); border-radius: 5px; padding: 2px 8px; cursor: pointer; }
 .text-btn:hover { border-color: var(--accent); }
 
@@ -214,11 +196,12 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .primary-btn:hover { filter: brightness(1.08); }
 .error { color: #ff7b7b; min-height: 1.4em; user-select: text; }
 
+/* Уведомления — над боковой панелью, чтобы не прятаться под нативным графом. */
 .toast {
   position: fixed;
-  bottom: 18px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 44px;
+  left: 12px;
+  max-width: calc(var(--sidebar-w) - 24px);
   padding: 8px 14px;
   border-radius: 8px;
   background: var(--bg-3);
@@ -228,15 +211,52 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   user-select: text;
 }
 
-.fps-meter {
-  position: fixed;
-  right: 12px;
-  bottom: 12px;
-  z-index: 20;
-  padding: 4px 9px;
+
+/* ---------- editor ---------- */
+.editor-wrap { flex: 1; min-width: 0; position: relative; display: flex; }
+#editor {
+  flex: 1;
+  border: 0;
+  outline: none;
+  resize: none;
+  padding: 36px max(32px, calc((100% - 760px) / 2)) 96px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.7 "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+  tab-size: 4;
+  user-select: text;
+  caret-color: var(--accent);
+}
+#editor::selection { background: var(--accent-bg); }
+.suggest {
+  position: absolute;
+  z-index: 5;
+  width: 280px;
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 28px #0006;
+}
+.suggest li { display: flex; flex-direction: column; padding: 5px 9px; border-radius: 5px; cursor: pointer; }
+.suggest li small { color: var(--muted); font-size: 11px; }
+.suggest li.active, .suggest li:hover { background: var(--accent-bg); }
+.save-status { font-size: 12px; color: var(--muted); margin-right: 4px; white-space: nowrap; }
+.save-status[data-kind="dirty"], .save-status[data-kind="saving"] { color: var(--fg-2); }
+.save-status[data-kind="error"] { color: #ff7b7b; }
+#btn-edit[aria-pressed="true"] { background: var(--accent-bg); color: var(--fg); }
+.new-note { padding: 0 10px 8px; }
+.new-note input {
+  width: 100%;
+  padding: 6px 10px;
   border-radius: 6px;
-  background: #000c;
-  color: #6ee7a8;
-  font: 600 13px/1.2 ui-monospace, "JetBrains Mono", monospace;
-  pointer-events: none;
+  border: 1px solid var(--accent);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
 }
