@@ -93,6 +93,27 @@ pub async fn create_note(state: State<'_, AppState>, spec: String) -> Result<Cre
     Ok(Created { path, vault })
 }
 
+#[derive(Serialize)]
+pub struct Renamed {
+    path: String,
+    vault: serde_json::Value,
+}
+
+/// Переименовывает/переносит заметку (`Имя` или `папка/Имя`), правит ссылки на неё.
+#[tauri::command]
+pub async fn rename_note(state: State<'_, AppState>, path: String, spec: String) -> Result<Renamed, String> {
+    let (session, path) = state.session.read().unwrap().as_ref().ok_or(NOT_OPEN)?.rename(&path, &spec)?;
+    let vault = install(&state, session)?;
+    Ok(Renamed { path, vault })
+}
+
+/// Удаляет файл заметки.
+#[tauri::command]
+pub async fn delete_note(state: State<'_, AppState>, path: String) -> Result<serde_json::Value, String> {
+    let session = state.session.read().unwrap().as_ref().ok_or(NOT_OPEN)?.delete(&path)?;
+    install(&state, session)
+}
+
 fn install(state: &AppState, session: Session) -> Result<serde_json::Value, String> {
     let json = to_json(&session)?;
     *state.session.write().unwrap() = Some(session);

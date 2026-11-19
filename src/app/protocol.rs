@@ -17,8 +17,12 @@ use crate::core::render::Renderer;
 
 pub const SCHEME: &str = "note";
 
-/// Адрес схемы в WebKitGTK.
+/// Адрес схемы: WebKitGTK (Linux) отдаёт её как есть, а WebView2 (Windows)
+/// — через `http://<схема>.localhost/`.
+#[cfg(not(windows))]
 pub const BASE_URL: &str = "note://localhost/";
+#[cfg(windows)]
+pub const BASE_URL: &str = "http://note.localhost/";
 
 type Resp = Response<Cow<'static, [u8]>>;
 

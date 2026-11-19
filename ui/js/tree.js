@@ -11,7 +11,7 @@ const chevron = () => {
   return s;
 };
 
-function noteRow(node, active, onOpen, hint) {
+function noteRow(node, active, onOpen, hint, onContext) {
   const row = document.createElement("div");
   row.className = "row" + (node.id === active ? " active" : "");
   row.dataset.id = node.id;
@@ -33,15 +33,16 @@ function noteRow(node, active, onOpen, hint) {
     row.append(h);
   }
   row.onclick = () => onOpen(node.id);
+  row.oncontextmenu = (e) => { e.preventDefault(); onContext?.(node.id, e.clientX, e.clientY); };
   return row;
 }
 
 /**
  * @param {HTMLElement} root
  * @param {{id:string,title:string,kind:string}[]} nodes
- * @param {{query:string, active:string|null, onOpen:(id:string)=>void}} opts
+ * @param {{query:string, active:string|null, onOpen:(id:string)=>void, onContext?:(id:string,x:number,y:number)=>void}} opts
  */
-export function renderTree(root, nodes, { query, active, onOpen }) {
+export function renderTree(root, nodes, { query, active, onOpen, onContext }) {
   const notes = nodes.filter((n) => n.kind !== "missing");
   const q = query.trim().toLowerCase();
   root.replaceChildren();
@@ -58,7 +59,7 @@ export function renderTree(root, nodes, { query, active, onOpen }) {
       .sort((a, b) => score(a, q) - score(b, q) || a.title.localeCompare(b.title));
     for (const n of hits) {
       const dir = n.id.includes("/") ? n.id.slice(0, n.id.lastIndexOf("/")) : "";
-      root.append(noteRow(n, active, onOpen, dir));
+      root.append(noteRow(n, active, onOpen, dir, onContext));
     }
     if (!hits.length) root.append(empty("Ничего не найдено"));
     return;
@@ -107,7 +108,7 @@ export function renderTree(root, nodes, { query, active, onOpen }) {
       container.append(det);
     }
     for (const n of dir.files.sort((a, b) => a.title.localeCompare(b.title))) {
-      container.append(noteRow(n, active, onOpen));
+      container.append(noteRow(n, active, onOpen, undefined, onContext));
     }
   };
   build(tree, "", root);

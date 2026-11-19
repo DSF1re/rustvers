@@ -56,7 +56,7 @@ pub struct Vault {
 impl Vault {
     /// Сканирует папку. Скрытые файлы и папки (`.git`, `.obsidian`, …) пропускаются.
     pub fn open(root: impl AsRef<Path>) -> io::Result<Self> {
-        let root = fs::canonicalize(root.as_ref())?;
+        let root = dunce::canonicalize(root.as_ref())?;
         if !root.is_dir() {
             return Err(io::Error::new(io::ErrorKind::NotADirectory, "не папка"));
         }
@@ -218,6 +218,37 @@ impl Vault {
         Ok(path)
     }
 
+    /// Новый путь заметки `old` по вводу пользователя при переименовании или
+    /// переносе: `Имя` (остаётся в своей папке), `папка/Имя`. Без расширения
+    /// сохраняется прежнее. Регистр можно менять (`идея` → `Идея`).
+    pub fn rename_path(&self, old: &str, spec: &str) -> Result<String, String> {
+        let note = self.note(old).ok_or_else(|| format!("Нет заметки {old}"))?;
+        let spec = spec.trim().replace('\\', "/");
+        let spec = spec.trim_matches('/');
+        if spec.is_empty() {
+            return Err("Пустое имя заметки".into());
+        }
+        let spec = if spec.contains('/') { spec.to_owned() } else {
+            let dir = paths::parent(&note.path);
+            if dir.is_empty() { spec.to_owned() } else { format!("{dir}/{spec}") }
+        };
+        if spec.split('/').any(|seg| seg.is_empty() || seg.starts_with('.') || seg.trim() != seg) {
+            return Err("Имя не может содержать пустые, скрытые (с точки) или окружённые пробелами части пути".into());
+        }
+        let path = paths::join_normalize("", &spec).ok_or("Путь выходит за пределы хранилища")?;
+        let path = if NoteKind::from_path(&path).is_some() {
+            path
+        } else {
+            let ext = paths::extension(&note.path).unwrap_or_else(|| "md".into());
+            format!("{path}.{ext}")
+        };
+        let lower = path.to_lowercase();
+        if lower != note.path.to_lowercase() && self.file_by_path.contains_key(&lower) {
+            return Err(format!("«{path}» уже существует"));
+        }
+        Ok(path)
+    }
+
     /// Разрешает ссылку на любой файл (картинки и прочие вложения).
     pub fn resolve_file(&self, target: &str, from: &str) -> Option<&str> {
         let target = target.trim();
@@ -284,6 +315,20 @@ pub(crate) mod tests {
         assert!(v.new_note_path(".hidden").is_err());
         assert!(v.new_note_path("a//b").is_err());
         assert!(v.new_note_path("").is_err());
+    }
+
+    #[test]
+    fn rename_paths() {
+        let v = sample();
+        assert_eq!(v.rename_path("Ideas/Rust.md", "Go").unwrap(), "Ideas/Go.md");
+        assert_eq!(v.rename_path("Ideas/Rust.md", "Other/Go").unwrap(), "Other/Go.md");
+        assert_eq!(v.rename_path("Web/Page.html", "Site").unwrap(), "Web/Site.html");
+        assert_eq!(v.rename_path("Ideas/Rust.md", "rust").unwrap(), "Ideas/rust.md");
+        assert_eq!(v.rename_path("index.md", "Index.md").unwrap(), "Index.md");
+        assert!(v.rename_path("index.md", "Ideas/deep/Rust").is_err());
+        assert!(v.rename_path("index.md", "../x").is_err());
+        assert!(v.rename_path("index.md", " ").is_err());
+        assert!(v.rename_path("nope.md", "x").is_err());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 // Оболочка приложения: состояние, боковая панель, навигация, просмотр заметок.
 import { Editor } from "./editor.js";
-import { NativeGraphView } from "./native-graph.js";
+import { GraphView } from "./graph.js";
 import { renderTree } from "./tree.js";
 
 const tauri = window.__TAURI__;
@@ -20,7 +20,7 @@ const state = {
   editing: false,      // режим правки исходника
 };
 
-const graph = new NativeGraphView($("graph"), { onOpen: (id) => openNote(id) });
+const graph = new GraphView($("graph"), { onOpen: (id) => openNote(id) });
 const editor = new Editor({
   textarea: $("editor"),
   suggest: $("suggest"),
@@ -202,19 +202,121 @@ async function createNote(spec) {
   }
 }
 
+let nameMode = null; // "new" | "rename" — для чего открыто поле имени
+let renameTarget = null;
+
 function showNewNote() {
   if (!state.vault) return;
+  nameMode = "new";
   const input = $("new-note-input");
   const dir = state.current?.includes("/") ? state.current.slice(0, state.current.lastIndexOf("/") + 1) : "";
+  $("new-note-label").textContent = "Новая заметка";
+  input.placeholder = "Имя, папка/Имя или Имя.html";
   $("new-note").hidden = false;
   input.value = dir;
   input.focus();
   input.setSelectionRange(dir.length, dir.length);
 }
 
+/** Поле переименования: путь без расширения .md; `папка/Имя` переносит заметку. */
+function showRename(id = state.current) {
+  const node = id && state.byId.get(id);
+  if (!node || node.kind === "missing") return;
+  nameMode = "rename";
+  renameTarget = id;
+  const input = $("new-note-input");
+  const value = id.replace(/\.(md|markdown)$/i, "");
+  $("new-note-label").textContent = "Переименовать (папка/Имя — перенос)";
+  input.placeholder = "Новое имя";
+  $("new-note").hidden = false;
+  input.value = value;
+  input.focus();
+  const from = value.lastIndexOf("/") + 1;
+  const ext = value.match(/\.html?$/i)?.[0].length || 0;
+  input.setSelectionRange(from, value.length - ext);
+}
+
 function hideNewNote() {
   $("new-note").hidden = true;
+  nameMode = null;
 }
+
+/** Переименовать заметку; ссылки на неё в других заметках правит бэкенд. */
+async function renameNote(id, spec) {
+  try {
+    await editor.flush();
+    if (editor.dirty) return;
+    const { path, vault } = await invoke("rename_note", { path: id, spec });
+    if (path === id) return;
+    state.history = state.history.map((h) => (h === id ? path : h));
+    graph.moveNode(id, path);
+    const wasCurrent = state.current === id;
+    if (wasCurrent) state.current = path;
+    indexVault(vault);
+    graph.setData(vault, { fresh: false });
+    if (wasCurrent) {
+      state.reload++;
+      if (state.editing) await editor.open(path, { discard: true });
+      else showNote(path, "");
+      graph.setSelected(path);
+    } else if (state.current) {
+      state.reload++;
+      if (state.editing) await editor.open(state.current, { discard: true }); // ссылки в тексте могли измениться
+      else showNote(state.current, "");
+    }
+    updateChrome();
+    toast(`Переименовано: ${path}`);
+  } catch (e) {
+    fail(e);
+  }
+}
+
+async function deleteNote(id = state.current) {
+  const node = id && state.byId.get(id);
+  if (!node || node.kind === "missing") return;
+  const ok = await tauri.dialog.ask(`Удалить «${id}»? Файл будет удалён с диска.`, { title: "Удаление заметки", kind: "warning", okLabel: "Удалить", cancelLabel: "Отмена" });
+  if (!ok) return;
+  try {
+    if (state.editing && editor.path === id) {
+      editor.dirty = false;
+      clearTimeout(editor.timer);
+      await editor.flush();
+      editor.path = null;
+    }
+    const vault = await invoke("delete_note", { path: id });
+    state.history = state.history.filter((h) => h !== id);
+    state.pos = Math.min(state.pos, state.history.length - 1);
+    const wasCurrent = state.current === id;
+    if (wasCurrent) { state.current = null; state.editing = false; }
+    indexVault(vault);
+    graph.setData(vault, { fresh: false });
+    if (wasCurrent) { showMode(); setView("graph"); }
+    updateChrome();
+    toast(`Удалено: ${id}`);
+  } catch (e) {
+    fail(e);
+  }
+}
+
+// Контекстное меню строки дерева.
+let ctxTarget = null;
+function showContext(id, x, y) {
+  ctxTarget = id;
+  const m = $("ctx-menu");
+  m.hidden = false;
+  m.style.left = `${Math.min(x, innerWidth - 180)}px`;
+  m.style.top = `${Math.min(y, innerHeight - 90)}px`;
+}
+const hideContext = () => { $("ctx-menu").hidden = true; };
+$("ctx-menu").addEventListener("click", (e) => {
+  const act = e.target.closest("li")?.dataset.act;
+  const id = ctxTarget;
+  hideContext();
+  if (act === "rename") showRename(id);
+  else if (act === "delete") deleteNote(id);
+});
+document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#ctx-menu")) hideContext(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideContext(); });
 
 function toggleView() {
   setView(state.view === "graph" ? "note" : "graph");
@@ -228,6 +330,7 @@ function updateChrome() {
   $("tab-note").disabled = !state.current;
   $("graph-tools").hidden = state.view !== "graph";
   $("btn-edit").hidden = state.view !== "note";
+  $("btn-rename").hidden = $("btn-delete").hidden = state.view !== "note";
   if (state.view !== "note") $("save-status").hidden = true;
   else $("save-status").hidden = !state.editing;
 
@@ -256,6 +359,7 @@ function refreshTree() {
     query: $("search").value,
     active: state.current,
     onOpen: (id) => openNote(id),
+    onContext: showContext,
   });
 }
 
@@ -308,11 +412,11 @@ window.addEventListener("message", (e) => {
 
 function handleKey({ key, ctrl, alt, shift }) {
   const k = key.length === 1 ? key.toLowerCase() : key;
-  if (ctrl && shift && (k === "f" || k === "а")) { graph.toggleFps(); return true; }
   if (ctrl && (k === "k" || k === "p" || k === "л" || k === "з")) { $("search").focus(); $("search").select(); return true; }
   if (ctrl && (k === "g" || k === "п")) { toggleView(); return true; }
   if (ctrl && (k === "e" || k === "у") && state.view === "note") { setEditing(!state.editing); return true; }
   if (ctrl && (k === "n" || k === "т")) { showNewNote(); return true; }
+  if (k === "F2" && state.current) { showRename(); return true; }
   if (ctrl && (k === "o" || k === "щ")) { pickVault(); return true; }
   if ((ctrl && (k === "r" || k === "к")) || k === "F5") { rescan(); return true; }
   if (alt && k === "ArrowLeft") { go(-1); return true; }
@@ -345,12 +449,17 @@ $("search").addEventListener("keydown", (e) => {
 $("btn-open").onclick = pickVault;
 $("btn-new").onclick = showNewNote;
 $("btn-edit").onclick = () => setEditing(!state.editing);
+$("btn-rename").onclick = () => showRename();
+$("btn-delete").onclick = () => deleteNote();
 $("new-note-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
     const spec = e.target.value.trim();
+    const mode = nameMode, target = renameTarget;
     hideNewNote();
-    if (spec) createNote(spec);
+    if (!spec) return;
+    if (mode === "rename") renameNote(target, spec);
+    else createNote(spec);
   } else if (e.key === "Escape") {
     e.preventDefault();
     e.stopPropagation();
@@ -425,11 +534,6 @@ function fail(e) {
 // ---------------------------------------------------------------------------
 
 (async () => {
-  try {
-    await graph.start();
-  } catch (e) {
-    $("graph-error").textContent = `Граф недоступен: ${e}`;
-  }
   try {
     const vault = await invoke("current_vault");
     if (vault) return loadVault(vault);

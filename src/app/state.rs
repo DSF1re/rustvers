@@ -121,6 +121,58 @@ impl Session {
         Ok((self.refresh()?, path))
     }
 
+    /// Переименовывает или переносит заметку и поправляет `[[ссылки]]` на неё
+    /// в остальных заметках. Возвращает обновлённую сессию и новый путь.
+    pub fn rename(&self, old: &str, spec: &str) -> Result<(Self, String), String> {
+        let new = self.vault.rename_path(old, spec)?;
+        if new == old {
+            return Ok((self.refresh()?, new));
+        }
+        let root = self.vault.root();
+        let (from, to) = (root.join(old), root.join(&new));
+        let case_only = new.to_lowercase() == old.to_lowercase();
+        if to.exists() && !case_only {
+            return Err(format!("«{new}» уже существует"));
+        }
+        if let Some(dir) = to.parent() {
+            fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        fs::rename(&from, &to).map_err(|e| format!("Не удалось переименовать: {e}"))?;
+        let mut fresh = self.refresh()?;
+
+        // Ссылки правим по старому индексу, а новый текст подбираем по новому.
+        let mut failed = 0;
+        let notes: Vec<_> = self.vault.notes().to_vec();
+        for note in &notes {
+            let was = &note.path;
+            let now = if was == old { new.as_str() } else { was.as_str() };
+            let full = fresh.vault.root().join(now);
+            let Ok(src) = fs::read_to_string(&full) else { continue };
+            let Some(text) = rewrite_links(note.kind, &src, |target| {
+                let hit = self.vault.resolve_note(target, was)?;
+                if hit.path != old {
+                    return None;
+                }
+                Some(link_text(&fresh.vault, target, now, &new))
+            }) else { continue };
+            if write_atomic(&full, text.as_bytes()).is_err() {
+                failed += 1;
+            }
+        }
+        fresh = fresh.refresh()?;
+        if failed > 0 {
+            return Err(format!("Заметка переименована, но ссылки не обновлены в {failed} файлах"));
+        }
+        Ok((fresh, new))
+    }
+
+    /// Удаляет заметку (файл) и возвращает обновлённую сессию.
+    pub fn delete(&self, path: &str) -> Result<Self, String> {
+        let note = self.vault.note(path).ok_or_else(|| format!("Нет заметки {path}"))?;
+        fs::remove_file(self.vault.root().join(&note.path)).map_err(|e| format!("Не удалось удалить: {e}"))?;
+        self.refresh()
+    }
+
     pub fn info(&self) -> VaultInfo<'_> {
         VaultInfo {
             name: self.vault.name(),
@@ -149,6 +201,60 @@ fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
         let _ = fs::remove_file(&tmp);
     }
     result
+}
+
+/// Заменяет цели `[[вики-ссылок]]` в Markdown/HTML; `None`, если менять нечего.
+fn rewrite_links(kind: NoteKind, src: &str, mut f: impl FnMut(&str) -> Option<String>) -> Option<String> {
+    let mut spans: Vec<(usize, usize, String)> = Vec::new();
+    let mut scan = |text: &str, base: usize| {
+        for w in links::find_wikilinks(text) {
+            if w.embed {
+                continue; // `![[...]]` — вложения, не заметки
+            }
+            if let Some(new) = f(w.target) {
+                // `target` — срез `text`, поэтому смещение берём из указателей.
+                let start = base + (w.target.as_ptr() as usize - text.as_ptr() as usize);
+                spans.push((start, start + w.target.len(), new));
+            }
+        }
+    };
+    match kind {
+        NoteKind::Markdown => scan(src, 0),
+        NoteKind::Html => {
+            for piece in links::html_pieces(src) {
+                if let links::Piece::Text(t) = piece {
+                    scan(t, t.as_ptr() as usize - src.as_ptr() as usize);
+                }
+            }
+        }
+    }
+    if spans.is_empty() {
+        return None;
+    }
+    spans.sort_by_key(|s| s.0);
+    let mut out = String::with_capacity(src.len() + 32);
+    let mut pos = 0;
+    for (a, b, new) in spans {
+        out.push_str(&src[pos..a]);
+        out.push_str(&new);
+        pos = b;
+    }
+    out.push_str(&src[pos..]);
+    Some(out)
+}
+
+/// Текст ссылки на заметку `new` из заметки `from`: короткое имя, если оно
+/// однозначно, иначе путь. Расширение сохраняется, если оно было в ссылке.
+fn link_text(vault: &Vault, old_target: &str, from: &str, new: &str) -> String {
+    let with_ext = paths::extension(old_target).is_some_and(|e| ["md", "html", "htm", "markdown"].contains(&e.as_str()));
+    let (stem, name) = (paths::file_stem(new), paths::file_name(new));
+    let strip = |p: &str| if with_ext { p.to_owned() } else { p.rsplit_once('.').map_or(p, |(s, _)| s).to_owned() };
+    for cand in [if with_ext { name } else { stem }.to_owned(), strip(new)] {
+        if vault.resolve_note(&cand, from).is_some_and(|n| n.path == new) {
+            return cand;
+        }
+    }
+    strip(new)
 }
 
 fn html_template(title: &str) -> String {
@@ -203,6 +309,33 @@ mod tests {
         // Устаревшее время изменения — отказ, файл не тронут.
         assert!(s.save("a.md", "затёрто", Some(new.wrapping_sub(5000))).is_err());
         assert_eq!(fs::read_to_string(dir.join("a.md")).unwrap(), "# A\n[[b]]");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rename_updates_links() {
+        let dir = temp_vault("rename");
+        fs::write(dir.join("a.md"), "см. [[b]], [[b#h|метка]], ![[b.png]] и [[b.md]]\n").unwrap();
+        fs::write(dir.join("c.html"), "<p>[[b]]</p><script>x = '[[b]]'</script>").unwrap();
+        let s = Session::open(&dir).unwrap();
+        let (s, path) = s.rename("b.md", "Новая").unwrap();
+        assert_eq!(path, "Новая.md");
+        assert!(!dir.join("b.md").exists() && dir.join("Новая.md").exists());
+        assert_eq!(
+            fs::read_to_string(dir.join("a.md")).unwrap(),
+            "см. [[Новая]], [[Новая#h|метка]], ![[b.png]] и [[Новая.md]]\n"
+        );
+        assert_eq!(fs::read_to_string(dir.join("c.html")).unwrap(), "<p>[[Новая]]</p><script>x = '[[b]]'</script>");
+        assert!(s.graph.nodes.iter().all(|n| n.id != "b.md"));
+
+        // Перенос в папку и конфликт имён.
+        let (s, path) = s.rename("Новая.md", "папка/Тема").unwrap();
+        assert_eq!(path, "папка/Тема.md");
+        assert!(fs::read_to_string(dir.join("a.md")).unwrap().contains("[[Тема]]"));
+        assert!(s.rename("a.md", "папка/Тема").is_err());
+
+        let s = s.delete("a.md").unwrap();
+        assert!(!dir.join("a.md").exists() && s.vault.note("a.md").is_none());
         let _ = fs::remove_dir_all(dir);
     }
 

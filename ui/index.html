@@ -25,9 +25,14 @@
         <input id="search" type="search" placeholder="Поиск заметок…  Ctrl+K" autocomplete="off" spellcheck="false">
       </div>
       <div class="new-note" id="new-note" hidden>
+        <label class="new-note-label" id="new-note-label" for="new-note-input"></label>
         <input id="new-note-input" placeholder="Имя, папка/Имя или Имя.html" autocomplete="off" spellcheck="false">
       </div>
       <nav id="tree" class="tree" aria-label="Заметки"></nav>
+      <ul class="ctx-menu" id="ctx-menu" hidden>
+        <li data-act="rename">Переименовать</li>
+        <li data-act="delete" class="danger">Удалить</li>
+      </ul>
       <footer class="sidebar-foot" id="stats"></footer>
     </aside>
     <div class="resizer" id="resizer"></div>
@@ -51,6 +56,12 @@
         <button class="icon-btn" id="btn-edit" title="Редактировать (Ctrl+E)" aria-label="Редактировать" aria-pressed="false" hidden>
           <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>
         </button>
+        <button class="icon-btn" id="btn-rename" title="Переименовать (F2)" aria-label="Переименовать" hidden>
+          <svg viewBox="0 0 24 24"><path d="M4 7V5h16v2M12 5v14M9 19h6"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-delete" title="Удалить заметку" aria-label="Удалить заметку" hidden>
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12h10l1-12M9 7V4h6v3"/></svg>
+        </button>
         <div class="segmented" role="tablist">
           <button id="tab-graph" role="tab" title="Граф (Ctrl+G)">Граф</button>
           <button id="tab-note" role="tab" title="Заметка (Ctrl+G)">Заметка</button>
@@ -58,8 +69,12 @@
       </header>
 
       <section id="graph-view" class="view">
-        <!-- Сюда Rust кладёт нативную подповерхность с графом (src/app/native). -->
-        <div id="graph"><p class="graph-error" id="graph-error"></p></div>
+        <canvas id="graph"></canvas>
+        <div class="legend">
+          <span><i class="dot md"></i>Markdown</span>
+          <span><i class="dot html"></i>HTML</span>
+          <span><i class="dot missing"></i>Нет файла</span>
+        </div>
       </section>
 
       <section id="note-view" class="view" hidden>

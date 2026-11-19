@@ -144,8 +144,29 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .view { flex: 1; min-height: 0; position: relative; }
 
 /* ---------- graph ---------- */
-#graph { position: absolute; inset: 0; display: grid; place-items: center; }
-.graph-error { color: var(--muted); max-width: 420px; text-align: center; user-select: text; }
+#graph { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+#graph.panning { cursor: grabbing; }
+#graph.over-node { cursor: pointer; }
+.legend {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-2) 88%, transparent);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  color: var(--fg-2);
+  font-size: 12px;
+}
+.legend span { display: flex; align-items: center; gap: 5px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.dot.md { background: var(--node-md); }
+.dot.html { background: var(--node-html); }
+.dot.missing { background: var(--node-missing); }
 
 .graph-tools { display: flex; align-items: center; gap: 12px; margin-right: 8px; color: var(--fg-2); font-size: 12px; white-space: nowrap; }
 .graph-tools label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
@@ -196,12 +217,11 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .primary-btn:hover { filter: brightness(1.08); }
 .error { color: #ff7b7b; min-height: 1.4em; user-select: text; }
 
-/* Уведомления — над боковой панелью, чтобы не прятаться под нативным графом. */
 .toast {
   position: fixed;
-  bottom: 44px;
-  left: 12px;
-  max-width: calc(var(--sidebar-w) - 24px);
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
   padding: 8px 14px;
   border-radius: 8px;
   background: var(--bg-3);
@@ -260,3 +280,20 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   font: inherit;
   outline: none;
 }
+
+.new-note-label { display: block; margin: 0 2px 4px; color: var(--muted); font-size: 11px; }
+.ctx-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 160px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 28px #0006;
+}
+.ctx-menu li { padding: 6px 10px; border-radius: 5px; cursor: pointer; }
+.ctx-menu li:hover { background: var(--accent-bg); }
+.ctx-menu li.danger { color: #ff7b7b; }

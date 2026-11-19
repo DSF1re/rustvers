@@ -1,8 +1,6 @@
 //! GUI-оболочка на Tauri: окно, команды и схема `note://`.
 
 mod commands;
-mod graph_cmd;
-mod native;
 mod protocol;
 mod state;
 
@@ -13,7 +11,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(state::AppState::default())
-        .manage(graph_cmd::NativeSlot::default())
         .register_asynchronous_uri_scheme_protocol(protocol::SCHEME, protocol::handle)
         .invoke_handler(tauri::generate_handler![
             commands::open_vault,
@@ -22,8 +19,8 @@ pub fn run() {
             commands::note_source,
             commands::save_note,
             commands::create_note,
-            graph_cmd::graph_native_init,
-            graph_cmd::graph_native,
+            commands::rename_note,
+            commands::delete_note,
         ])
         .setup(|app| {
             let initial = commands::initial_vault(app.handle());
