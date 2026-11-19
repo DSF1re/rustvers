@@ -202,15 +202,7 @@ impl Vault {
     /// `страница.html`. Без расширения — Markdown. Запрещены выход за корень,
     /// скрытые сегменты и уже существующие заметки.
     pub fn new_note_path(&self, spec: &str) -> Result<String, String> {
-        let spec = spec.trim().replace('\\', "/");
-        let spec = spec.trim_matches('/');
-        if spec.is_empty() {
-            return Err("Пустое имя заметки".into());
-        }
-        if spec.split('/').any(|seg| seg.is_empty() || seg.starts_with('.') || seg.trim() != seg) {
-            return Err("Имя не может содержать пустые, скрытые (с точки) или окружённые пробелами части пути".into());
-        }
-        let path = paths::join_normalize("", spec).ok_or("Путь выходит за пределы хранилища")?;
+        let path = checked_path(spec)?;
         let path = if NoteKind::from_path(&path).is_some() { path } else { format!("{path}.md") };
         if self.note(&path).is_some() || self.file_by_path.contains_key(&path.to_lowercase()) {
             return Err(format!("«{path}» уже существует"));
@@ -225,17 +217,11 @@ impl Vault {
         let note = self.note(old).ok_or_else(|| format!("Нет заметки {old}"))?;
         let spec = spec.trim().replace('\\', "/");
         let spec = spec.trim_matches('/');
-        if spec.is_empty() {
-            return Err("Пустое имя заметки".into());
-        }
-        let spec = if spec.contains('/') { spec.to_owned() } else {
+        let spec = if spec.contains('/') || spec.is_empty() { spec.to_owned() } else {
             let dir = paths::parent(&note.path);
             if dir.is_empty() { spec.to_owned() } else { format!("{dir}/{spec}") }
         };
-        if spec.split('/').any(|seg| seg.is_empty() || seg.starts_with('.') || seg.trim() != seg) {
-            return Err("Имя не может содержать пустые, скрытые (с точки) или окружённые пробелами части пути".into());
-        }
-        let path = paths::join_normalize("", &spec).ok_or("Путь выходит за пределы хранилища")?;
+        let path = checked_path(&spec)?;
         let path = if NoteKind::from_path(&path).is_some() {
             path
         } else {
@@ -268,6 +254,41 @@ impl Vault {
             .min_by_key(|p| (p.matches('/').count(), p.len()))
             .map(String::as_str)
     }
+}
+
+/// Проверяет путь новой/переименованной заметки из ввода пользователя (или из
+/// сообщения заметки) и возвращает его в виде `папка/имя`. Пропускает только
+/// обычные имена, которые одинаково безопасны в Linux и Windows: без `..`,
+/// дисков (`C:`), потоков NTFS (`a.md:x`), служебных символов и имён
+/// устройств (`CON`, `NUL`, `COM1`…), чтобы путь не мог уйти из хранилища.
+fn checked_path(spec: &str) -> Result<String, String> {
+    let spec = spec.trim().replace('\\', "/");
+    let spec = spec.trim_matches('/');
+    if spec.is_empty() {
+        return Err("Пустое имя заметки".into());
+    }
+    for seg in spec.split('/') {
+        if seg.is_empty() || seg.starts_with('.') || seg.trim() != seg || seg.ends_with('.') {
+            return Err("Имя не может содержать пустые, скрытые (с точки), оканчивающиеся точкой или окружённые пробелами части пути".into());
+        }
+        if let Some(c) = seg.chars().find(|c| c.is_control() || r#"<>:"|?*"#.contains(*c)) {
+            return Err(format!("Недопустимый символ в имени: «{}»", c.escape_default()));
+        }
+        let base = seg.split('.').next().unwrap_or(seg).trim_end().to_ascii_uppercase();
+        let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+            || (base.len() == 4
+                && (base.starts_with("COM") || base.starts_with("LPT"))
+                && base.as_bytes()[3].is_ascii_digit());
+        if reserved {
+            return Err(format!("«{seg}» — зарезервированное имя устройства в Windows"));
+        }
+    }
+    let path = paths::join_normalize("", spec).ok_or("Путь выходит за пределы хранилища")?;
+    // Второй рубеж: только обычные компоненты, никаких корней и префиксов.
+    if !Path::new(&path).components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+        return Err("Путь выходит за пределы хранилища".into());
+    }
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -315,6 +336,12 @@ pub(crate) mod tests {
         assert!(v.new_note_path(".hidden").is_err());
         assert!(v.new_note_path("a//b").is_err());
         assert!(v.new_note_path("").is_err());
+        // Пути, которые на Windows ушли бы из хранилища или в устройство.
+        for bad in ["C:/Windows/x", "C:x", "a.md:поток", "CON", "nul.md", "папка/com1.txt", "lpt9", "a?b", "a.", "x\u{1}y"] {
+            assert!(v.new_note_path(bad).is_err(), "{bad}");
+            assert!(v.rename_path("index.md", bad).is_err(), "{bad}");
+        }
+        assert!(v.new_note_path("Console").is_ok() && v.new_note_path("com10").is_ok());
     }
 
     #[test]
